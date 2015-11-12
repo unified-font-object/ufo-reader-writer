@@ -102,6 +102,7 @@ def userNameToFileName(userName, existing=[], prefix="", suffix=""):
 	userName = ".".join(parts)
 	# test for clash
 	fullName = prefix + userName + suffix
+	existing = [name.lower() for name in existing]
 	if fullName.lower() in existing:
 		fullName = handleClash1(userName, existing, prefix, suffix)
 	# finished
