@@ -1214,6 +1214,9 @@ def _validateAndMassagePointStructures(contour, pointAttributes, openContourOffC
 		if pointType == "offcurve":
 			pointType = None
 		element.attrib["segmentType"] = pointType
+		# curve cannot be preceded by more than 2 off-curve points
+		if pointType == "curve" and index > 2 and lastOnCurvePoint < index - 3:
+			raise GlifLibError("A curve point occurs after more than 2 off-curve points in the contour.")
 		if pointType is None:
 			haveOffCurvePoint = True
 		else:
@@ -1221,6 +1224,9 @@ def _validateAndMassagePointStructures(contour, pointAttributes, openContourOffC
 		# move can only occur as the first point
 		if pointType == "move" and index != 0:
 			raise GlifLibError("A move point occurs after the first point in the contour.")
+		# line cannot occur after an off-curve point
+		if pointType == "line" and index > 0 and contour[index - 1].attrib["segmentType"] == None:
+			raise GlifLibError("A line point occurs after an off-curve point in the contour.")
 		# smooth is optional
 		smooth = element.get("smooth", "no")
 		if smooth is not None:
