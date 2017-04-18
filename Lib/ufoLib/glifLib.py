@@ -112,6 +112,12 @@ class GlyphSet(object):
 		extension). The glyphNameToFileName function is called whenever
 		a file name is created for a given glyph name.
 		"""
+		if isinstance(dirName, basestring):
+			from fs.opener import fsopendir
+			fs = fsopendir(path)
+		else:
+			fs = dirName
+		self._fs = fs
 		self.dirName = dirName
 		if ufoFormatVersion not in supportedUFOFormatVersions:
 			raise GlifLibError("Unsupported UFO format version: %s" % ufoFormatVersion)
@@ -127,12 +133,11 @@ class GlyphSet(object):
 		"""
 		Rebuild the contents dict by loading contents.plist.
 		"""
-		contentsPath = os.path.join(self.dirName, "contents.plist")
-		if not os.path.exists(contentsPath):
+		if not self._fs.exists("contents.plist"):
 			# missing, consider the glyphset empty.
 			contents = {}
 		else:
-			contents = self._readPlist(contentsPath)
+			contents = self._readPlist("contents.plist")
 		# validate the contents
 		invalidFormat = False
 		if not isinstance(contents, dict):
@@ -143,7 +148,7 @@ class GlyphSet(object):
 					invalidFormat = True
 				if not isinstance(fileName, basestring):
 					invalidFormat = True
-				elif not os.path.exists(os.path.join(self.dirName, fileName)):
+				elif not self._fs.exists(fileName):
 					raise GlifLibError("contents.plist references a file that does not exist: %s" % fileName)
 		if invalidFormat:
 			raise GlifLibError("contents.plist is not properly formatted")
@@ -171,17 +176,15 @@ class GlyphSet(object):
 		Write the contents.plist file out to disk. Call this method when
 		you're done writing glyphs.
 		"""
-		contentsPath = os.path.join(self.dirName, "contents.plist")
-		with open(contentsPath, "wb") as f:
+		with self._fs.open("contents.plist", "wb") as f:
 			writePlist(self.contents, f)
 
 	# layer info
 
 	def readLayerInfo(self, info):
-		path = os.path.join(self.dirName, LAYERINFO_FILENAME)
-		if not os.path.exists(path):
+		if not self._fs.exists(LAYERINFO_FILENAME):
 			return
-		infoDict = self._readPlist(path)
+		infoDict = self._readPlist(LAYERINFO_FILENAME)
 		if not isinstance(infoDict, dict):
 			raise GlifLibError("layerinfo.plist is not properly formatted.")
 		infoDict = validateLayerInfoVersion3Data(infoDict)
@@ -209,8 +212,7 @@ class GlyphSet(object):
 		# validate
 		infoData = validateLayerInfoVersion3Data(infoData)
 		# write file
-		path = os.path.join(self.dirName, LAYERINFO_FILENAME)
-		with open(path, "wb") as f:
+		with self._fs.open(LAYERINFO_FILENAME, "wb") as f:
 			writePlist(infoData, f)
 
 	# read caching
@@ -233,20 +235,17 @@ class GlyphSet(object):
 		"""
 		needRead = False
 		fileName = self.contents.get(glyphName)
-		path = None
-		if fileName is not None:
-			path = os.path.join(self.dirName, fileName)
 		if glyphName not in self._glifCache:
 			needRead = True
-		elif fileName is not None and os.path.getmtime(path) != self._glifCache[glyphName][1]:
+		elif fileName is not None and self._fs.getinfo(fileName)['modified_time'] != self._glifCache[glyphName][1]:
 			needRead = True
 		if needRead:
 			fileName = self.contents[glyphName]
-			if not os.path.exists(path):
+			if not self._fs.exists(fileName):
 				raise KeyError(glyphName)
-			with open(path, "rb") as f:
+			with self._fs.open(fileName, "rb") as f:
 				text = f.read()
-			self._glifCache[glyphName] = (text, os.path.getmtime(path))
+			self._glifCache[glyphName] = (text, self._fs.getinfo(fileName)['modified_time'])
 		return self._glifCache[glyphName][0]
 
 	def getGLIFModificationTime(self, glyphName):
@@ -349,13 +348,12 @@ class GlyphSet(object):
 			self.contents[glyphName] = fileName
 			if self._reverseContents is not None:
 				self._reverseContents[fileName.lower()] = glyphName
-		path = os.path.join(self.dirName, fileName)
-		if os.path.exists(path):
-			with open(path, "rb") as f:
+		if self._fs.exists(fileName):
+			with self._fs.open(fileName, "rb") as f:
 				oldData = f.read()
 			if data == oldData:
 				return
-		with open(path, "wb") as f:
+		with self._fs.open(fileName, "wb") as f:
 			f.write(tobytes(data, encoding="utf-8"))
 
 	def deleteGlyph(self, glyphName):
@@ -364,7 +362,7 @@ class GlyphSet(object):
 		"""
 		self._purgeCachedGLIF(glyphName)
 		fileName = self.contents[glyphName]
-		os.remove(os.path.join(self.dirName, fileName))
+		self._fs.remove(fileName)
 		if self._reverseContents is not None:
 			del self._reverseContents[self.contents[glyphName].lower()]
 		del self.contents[glyphName]
@@ -438,7 +436,7 @@ class GlyphSet(object):
 
 	def _readPlist(self, path):
 		try:
-			with open(path, "rb") as f:
+			with self._fs.open(path, "rb") as f:
 				data = readPlist(f)
 			return data
 		except:
