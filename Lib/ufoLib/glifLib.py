@@ -16,6 +16,7 @@ import os
 from io import BytesIO, open
 from warnings import warn
 from fontTools.misc.py23 import tobytes, unicode
+from ufoLib.filesystem import FileSystem
 from ufoLib.plistlib import PlistWriter, readPlist, writePlist
 from ufoLib.plistFromETree import readPlistFromTree
 from ufoLib.pointPen import AbstractPointPen, PointToSegmentPen
@@ -102,7 +103,7 @@ class GlyphSet(object):
 
 	glyphClass = Glyph
 
-	def __init__(self, dirName, glyphNameToFileNameFunc=None, ufoFormatVersion=3):
+	def __init__(self, dirName, fileSystem=None, glyphNameToFileNameFunc=None, ufoFormatVersion=3):
 		"""
 		'dirName' should be a path to an existing directory.
 
@@ -112,9 +113,13 @@ class GlyphSet(object):
 		extension). The glyphNameToFileName function is called whenever
 		a file name is created for a given glyph name.
 		"""
-		self.dirName = dirName
 		if ufoFormatVersion not in supportedUFOFormatVersions:
 			raise GlifLibError("Unsupported UFO format version: %s" % ufoFormatVersion)
+		if fileSystem is None:
+			fileSystem = FileSystem(dirName)
+			dirName = ""
+		self.dirName = dirName
+		self.fileSystem = fileSystem
 		self.ufoFormatVersion = ufoFormatVersion
 		if glyphNameToFileNameFunc is None:
 			glyphNameToFileNameFunc = glyphNameToFileName
@@ -127,12 +132,12 @@ class GlyphSet(object):
 		"""
 		Rebuild the contents dict by loading contents.plist.
 		"""
-		contentsPath = os.path.join(self.dirName, "contents.plist")
-		if not os.path.exists(contentsPath):
+		contentsPath = self.fileSystem.joinPath(self.dirName, "contents.plist")
+		if not self.fileSystem.exists(contentsPath):
 			# missing, consider the glyphset empty.
 			contents = {}
 		else:
-			contents = self._readPlist(contentsPath)
+			contents = self.fileSystem.readPlist(contentsPath)
 		# validate the contents
 		invalidFormat = False
 		if not isinstance(contents, dict):
@@ -143,7 +148,7 @@ class GlyphSet(object):
 					invalidFormat = True
 				if not isinstance(fileName, basestring):
 					invalidFormat = True
-				elif not os.path.exists(os.path.join(self.dirName, fileName)):
+				elif not self.fileSystem.exists(self.fileSystem.joinPath(self.dirName, fileName)):
 					raise GlifLibError("contents.plist references a file that does not exist: %s" % fileName)
 		if invalidFormat:
 			raise GlifLibError("contents.plist is not properly formatted")
@@ -171,17 +176,16 @@ class GlyphSet(object):
 		Write the contents.plist file out to disk. Call this method when
 		you're done writing glyphs.
 		"""
-		contentsPath = os.path.join(self.dirName, "contents.plist")
-		with open(contentsPath, "wb") as f:
-			writePlist(self.contents, f)
+		path = self.fileSystem.joinPath(self.dirName, "contents.plist")
+		self.fileSystem.writePlist(path, self.contents)
 
 	# layer info
 
 	def readLayerInfo(self, info):
-		path = os.path.join(self.dirName, LAYERINFO_FILENAME)
-		if not os.path.exists(path):
+		path = self.fileSystem.joinPath(self.dirName, LAYERINFO_FILENAME)
+		if not self.fileSystem.exists(path):
 			return
-		infoDict = self._readPlist(path)
+		infoDict = self.fileSystem.readPlist(path)
 		if not isinstance(infoDict, dict):
 			raise GlifLibError("layerinfo.plist is not properly formatted.")
 		infoDict = validateLayerInfoVersion3Data(infoDict)
@@ -209,11 +213,10 @@ class GlyphSet(object):
 		# validate
 		infoData = validateLayerInfoVersion3Data(infoData)
 		# write file
-		path = os.path.join(self.dirName, LAYERINFO_FILENAME)
-		with open(path, "wb") as f:
-			writePlist(infoData, f)
+		path = self.fileSystem.joinPath(self.dirName, LAYERINFO_FILENAME)
+		self.fileSystem.writePlist(path, infoData)
 
-	# read caching
+	# # read caching
 
 	def getGLIF(self, glyphName):
 		"""
@@ -235,18 +238,18 @@ class GlyphSet(object):
 		fileName = self.contents.get(glyphName)
 		path = None
 		if fileName is not None:
-			path = os.path.join(self.dirName, fileName)
+			path = self.fileSystem.joinPath(self.dirName, fileName)
 		if glyphName not in self._glifCache:
 			needRead = True
-		elif fileName is not None and os.path.getmtime(path) != self._glifCache[glyphName][1]:
+		elif fileName is not None and self.fileSystem.getFileModificationTime(path) != self._glifCache[glyphName][1]:
 			needRead = True
 		if needRead:
 			fileName = self.contents[glyphName]
-			if not os.path.exists(path):
+			if not self.fileSystem.exists(path):
 				raise KeyError(glyphName)
-			with open(path, "rb") as f:
+			with self.fileSystem.open(path, "rb") as f:
 				text = f.read()
-			self._glifCache[glyphName] = (text, os.path.getmtime(path))
+			self._glifCache[glyphName] = (text, self.fileSystem.getFileModificationTime(path))
 		return self._glifCache[glyphName][0]
 
 	def getGLIFModificationTime(self, glyphName):
@@ -349,13 +352,14 @@ class GlyphSet(object):
 			self.contents[glyphName] = fileName
 			if self._reverseContents is not None:
 				self._reverseContents[fileName.lower()] = glyphName
-		path = os.path.join(self.dirName, fileName)
-		if os.path.exists(path):
-			with open(path, "rb") as f:
+		self.fileSystem.makeDirectory(self.dirName)
+		path = self.fileSystem.joinPath(self.dirName, fileName)
+		if self.fileSystem.exists(path):
+			with self.fileSystem.open(path, "rb") as f:
 				oldData = f.read()
 			if data == oldData:
 				return
-		with open(path, "wb") as f:
+		with self.fileSystem.open(path, "wb") as f:
 			f.write(tobytes(data, encoding="utf-8"))
 
 	def deleteGlyph(self, glyphName):
@@ -364,7 +368,8 @@ class GlyphSet(object):
 		"""
 		self._purgeCachedGLIF(glyphName)
 		fileName = self.contents[glyphName]
-		os.remove(os.path.join(self.dirName, fileName))
+		path = self.fileSystem.joinPath(self.dirName, fileName)
+		self.fileSystem.remove(path)
 		if self._reverseContents is not None:
 			del self._reverseContents[self.contents[glyphName].lower()]
 		del self.contents[glyphName]
@@ -433,16 +438,6 @@ class GlyphSet(object):
 			text = self.getGLIF(glyphName)
 			images[glyphName] = _fetchImageFileName(text)
 		return images
-
-	# internal methods
-
-	def _readPlist(self, path):
-		try:
-			with open(path, "rb") as f:
-				data = readPlist(f)
-			return data
-		except:
-			raise GlifLibError("The file %s could not be read." % path)
 
 
 # -----------------------
