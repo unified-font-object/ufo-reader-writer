@@ -995,10 +995,21 @@ def _readNote(glyphObject, note):
 def _readLib(glyphObject, lib):
 	assert len(lib) == 1
 	child = lib[0]
-	plist = readPlistFromTree(child)
-	valid, message = glyphLibValidator(plist)
-	if not valid:
-		raise GlifLibError(message)
+	try:
+		plist = readPlistFromTree(child)
+		valid, message = glyphLibValidator(plist)
+		if not valid:
+			raise GlifLibError(message)
+	except ValueError as e:
+		if hasattr(glyphObject, 'font'):  # for unit tests
+			filename = glyphObject.font.path
+		else:
+			filename = ""
+
+		raise GlifLibError(
+			"{}, glyph '{}': error while reading .glif file"
+			"(ignore line number): {}".format(
+				filename, glyphObject.name, e))
 	_relaxedSetattr(glyphObject, "lib", plist)
 
 def _readImage(glyphObject, image):

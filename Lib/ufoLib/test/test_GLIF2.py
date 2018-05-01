@@ -351,6 +351,20 @@ class TestGLIF2(unittest.TestCase):
 		self.assertEqual(glif, resultGlif)
 		self.assertEqual(py, resultPy)
 
+	def testLib_illegal(self):
+		glif = """
+		<glyph name="a" format="2">
+			<outline>
+			</outline>
+			<lib>
+				<dict>
+					<key>key</key>
+				</dict>
+			</lib>
+		</glyph>
+		"""
+		self.assertRaises(GlifLibError, self.glifToPy, glif)
+
 	def testGuidelines_legal(self):
 		# legal
 		glif = """

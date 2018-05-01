@@ -35,6 +35,20 @@ try:
 			def __init__(self):
 				super().__init__(use_builtin_types=True, dict_type=dict)
 
+				# plistlib in Python >= 3.1 assumes that it will parse plist
+				# files itself instead of being passed a parsed element tree
+				# like done by ufoLib. Exceptions on invalid data are supposed
+				# to include the line number, which is taken from the parser --
+				# that isn't set up in our case, because we parsed the file
+				# already. We therefore have to provide a fake parser object to
+				# get the ValueError exceptions instead of the AttributeError
+				# ones.
+				class FakeParserObject():
+
+					CurrentLineNumber = 0
+
+				self.parser = FakeParserObject()
+
 			def parseElement(self, *args, **kwargs):
 				super().parse_element(*args, **kwargs)
 
